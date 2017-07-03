@@ -18,6 +18,8 @@ package io.confluent.kafkarest;
 
 import kafka.javaapi.FetchRequest;
 import kafka.javaapi.FetchResponse;
+import kafka.javaapi.OffsetRequest;
+import kafka.javaapi.OffsetResponse;
 import kafka.javaapi.consumer.SimpleConsumer;
 
 public class SimpleFetcher {
@@ -36,6 +38,10 @@ public class SimpleFetcher {
 
   public FetchResponse fetch(final FetchRequest request) {
     return consumer.fetch(request);
+  }
+
+  public OffsetResponse getOffsetsBefore(OffsetRequest request) {
+    return consumer.getOffsetsBefore(request);
   }
 
   public void close() throws Exception {

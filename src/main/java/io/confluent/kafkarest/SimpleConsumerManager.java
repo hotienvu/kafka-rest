@@ -40,14 +40,18 @@ import io.confluent.kafkarest.entities.BinaryConsumerRecord;
 import io.confluent.kafkarest.entities.ConsumerRecord;
 import io.confluent.kafkarest.entities.EmbeddedFormat;
 import io.confluent.kafkarest.entities.JsonConsumerRecord;
+import io.confluent.kafkarest.entities.Partition;
+import io.confluent.kafkarest.entities.PartitionOffsetRange;
 import io.confluent.rest.exceptions.RestException;
 import io.confluent.rest.exceptions.RestServerErrorException;
 import kafka.api.PartitionFetchInfo;
+import kafka.api.PartitionOffsetRequestInfo;
 import kafka.cluster.Broker;
 import kafka.cluster.EndPoint;
 import kafka.common.TopicAndPartition;
 import kafka.javaapi.FetchRequest;
 import kafka.javaapi.FetchResponse;
+import kafka.javaapi.OffsetResponse;
 import kafka.javaapi.message.ByteBufferMessageSet;
 import kafka.message.MessageAndMetadata;
 import kafka.message.MessageAndOffset;
@@ -128,6 +132,62 @@ public class SimpleConsumerManager {
       }
     }
     throw Errors.noSslSupportException();
+  }
+
+  public List<PartitionOffsetRange> fetchPartitionOffsets(String topic) {
+    List<PartitionOffsetRange> offsetRangeList = new ArrayList<>();
+    List<Partition> listPartitions = mdObserver.getTopicPartitions(topic);
+
+    for (Partition partition : listPartitions) {
+      final Broker broker = mdObserver.getLeader(topic, partition.getPartition());
+
+      PartitionOffsetRange offsetRange = new PartitionOffsetRange(partition.getPartition(), 0L, 0L);
+
+      //we will get range offset for a particular partition
+      Long[] timestamps = new Long[]{kafka.api.OffsetRequest.EarliestTime(),
+              kafka.api.OffsetRequest.LatestTime()};
+      SimpleFetcher simpleFetcher = getSimpleFetcher(broker);
+
+      for (Long timestamp : timestamps) {
+        Map<TopicAndPartition, PartitionOffsetRequestInfo> requestInfo = new HashMap<>();
+        TopicAndPartition topicAndPartition = new TopicAndPartition(
+                topic, partition.getPartition());
+        requestInfo.put(topicAndPartition, new PartitionOffsetRequestInfo(timestamp, 1));
+
+        kafka.javaapi.OffsetRequest request = new kafka.javaapi.OffsetRequest(
+                requestInfo, kafka.api.OffsetRequest.CurrentVersion(), simpleFetcher.clientId());
+        OffsetResponse response = simpleFetcher.getOffsetsBefore(request);
+        if (response.hasError()) {
+          throw new RestException("failed to obtain offset from partition "
+                  + partition.getPartition(),
+                  Response.Status.INTERNAL_SERVER_ERROR.getStatusCode(),
+                  Response.Status.INTERNAL_SERVER_ERROR.getStatusCode());
+        }
+
+        long[] offsets = response.offsets(topic, partition.getPartition());
+        if (timestamp == kafka.api.OffsetRequest.EarliestTime()) {
+          offsetRange.setFromOffset(offsets[0]);
+        } else if (timestamp == kafka.api.OffsetRequest.LatestTime()) {
+          offsetRange.setToOffset(offsets[0]);
+        }
+      }
+
+      //adding that partitions offset into list
+      offsetRangeList.add(offsetRange);
+
+      //return the simple consumer to the pool
+      try {
+        simpleFetcher.close();
+      } catch (Exception e) {
+        //TODO: if we are unable to get offset from a partition; return error instead
+        throw new RestException("unable to close simple fetcher when getting offset of partition "
+                + partition.getPartition(),
+                Response.Status.INTERNAL_SERVER_ERROR.getStatusCode(),
+                Response.Status.INTERNAL_SERVER_ERROR.getStatusCode());
+      }
+    }
+
+    return offsetRangeList;
   }
 
   public void consume(

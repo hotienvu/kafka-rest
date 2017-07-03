@@ -16,6 +16,7 @@
 
 package io.confluent.kafkarest.resources;
 
+import io.confluent.kafkarest.entities.PartitionOffsetRange;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -90,6 +91,13 @@ public class PartitionsResource {
     return part;
   }
 
+  @GET
+  @Path("/offsets")
+  @PerformanceMetric("partitions.offsets")
+  public List<PartitionOffsetRange> getPartitionOffsets(final @PathParam("topic") String topic) {
+    checkTopicExists(topic);
+    return ctx.getSimpleConsumerManager().fetchPartitionOffsets(topic);
+  }
 
   @GET
   @Path("/{partition}/messages")
